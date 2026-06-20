@@ -322,37 +322,58 @@ async def _run_review_pipeline(
     elapsed = time.time() - start_time
     pipeline_result["elapsed_seconds"] = round(elapsed, 1)
 
-    # 分数提取（增强版，支持多种返回格式）
+    # 分数提取（健壮版）
     def extract_score(r):
-        try:
-            # 方法1：直接获取键
-            if isinstance(r, dict):
-                s = r.get("overall_score", r.get("test_score", None))
-                if s is not None:
-                    return int(s)
-            # 方法2：从 content 字段解析
-            content = r.get("content", "") if isinstance(r, dict) else ""
-            if content and isinstance(content, str):
-                import json, re
-                # 尝试直接解析 JSON
+        if not isinstance(r, dict):
+            return 0
+        # 方法1：直接获取键（支持多种可能键名）
+        for key in ["overall_score", "test_score", "score", "rating"]:
+            v = r.get(key, None)
+            if v is not None:
                 try:
-                    parsed = json.loads(content)
-                    if isinstance(parsed, dict):
-                        s = parsed.get("overall_score", parsed.get("test_score", None))
-                        if s is not None:
-                            return int(s)
-                except (json.JSONDecodeError, ValueError):
+                    return int(v)
+                except (ValueError, TypeError):
                     pass
-                # 正则搜索
-                m = re.search(r'"(?:overall_score|test_score|score|rating)"\s*:\s*(\d+)', content, re.IGNORECASE)
+        # 方法2：从 content 字段解析 JSON
+        content = r.get("content", "")
+        if content and isinstance(content, str):
+            import json, re
+            # 尝试直接解析 JSON
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    for key in ["overall_score", "test_score", "score"]:
+                        v = parsed.get(key, None)
+                        if v is not None:
+                            return int(v)
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # 正则搜索各种格式
+            patterns = [
+                r'"(overall_score|test_score|score|rating)"\s*:\s*(\d+)',
+                r'(总分|分数|score|rating)[:\s]*(\d+)',
+            ]
+            for pat in patterns:
+                m = re.search(pat, content, re.IGNORECASE)
                 if m:
-                    return int(m.group(1))
-                m2 = re.search(r'(总分|分数)[:\s]*(\d+)', content, re.IGNORECASE)
-                if m2:
-                    return int(m2.group(2))
-        except Exception:
-            pass
-        return 0
+                    return int(m.group(2))
+        # 方法3：递归搜索嵌套字典
+        def search_score(d, depth=0):
+            if depth > 3 or not isinstance(d, dict):
+                return None
+            for k, v in d.items():
+                if "score" in k.lower():
+                    try:
+                        return int(v)
+                    except (ValueError, TypeError):
+                        pass
+                if isinstance(v, dict):
+                    r = search_score(v, depth + 1)
+                    if r is not None:
+                        return r
+            return None
+        found = search_score(r)
+        return found if found is not None else 0
 
     rv_score = extract_score(pipeline_result.get("phase_2_review", {}))
     tt_score = extract_score(pipeline_result.get("phase_3_test", {}))
