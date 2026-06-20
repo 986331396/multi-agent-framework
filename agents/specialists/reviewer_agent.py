@@ -7,6 +7,8 @@ UI 还原度审核 Agent（ReviewerAgent）
 4. 输出审核报告（通过/不通过 + 详细问题列表）
 """
 
+import re
+import json
 from ..base_agent import BaseAgent
 from typing import Any, Dict
 
@@ -67,27 +69,24 @@ class ReviewerAgent(BaseAgent):
 
 ## 输出格式要求
 
-你必须以严格的 JSON 格式输出审核结果：
+你必须严格按照以下 JSON 格式输出（不要添加 ```json``` 标记）：
 
-```json
-{{
-    "overall_status": "PASS" | "FAIL" | "CONDITIONAL_PASS",
-    "overall_score": <0-100>,
-    "summary": "<一段话总结>",
-    "details": {{
-        "layout": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
-        "color": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
-        "typography": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
-        "components": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
-        "3d_viewport": {{"score": <0-100>, "status": "PASS|FAIL|N/A", "issues": ["..."]}}
-    }},
-    "critical_issues": [
-        {{"severity": "CRITICAL|MAJOR|MINOR", "category": "<类别>", 
-         "description": "<问题描述>", "suggestion": "<修复建议>", 
-         "location": "<文件:行号>"}}
-    ],
-    "optimization_suggestions": ["<优化建议>"],
-    "verdict": "<最终结论：建议通过/需要修改后重审/必须重做>"
+{{"overall_status": "PASS" | "FAIL" | "CONDITIONAL_PASS",
+  "overall_score": <0-100>,
+  "summary": "<一段话总结>",
+  "details": {{
+      "layout": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
+      "color": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
+      "typography": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
+      "components": {{"score": <0-100>, "status": "PASS|FAIL", "issues": ["..."]}},
+      "3d_viewport": {{"score": <0-100>, "status": "PASS|FAIL|N/A", "issues": ["..."]}}
+  }},
+  "critical_issues": [
+      {{"severity": "CRITICAL|MAJOR|MINOR", "category": "<类别>", 
+        "description": "<问题描述>", "suggestion": "<修复建议>"}}
+  ],
+  "optimization_suggestions": ["<优化建议>"],
+  "verdict": "<最终结论：建议通过/需要修改后重审/必须重做>"
 }}
 
 ## 评判标准
@@ -117,7 +116,7 @@ class ReviewerAgent(BaseAgent):
 {ui_spec}
 
 ## 已生成的代码
-```html/wxml/css/js
+```html/wxml/css/wxss/js
 {generated_code}
 ```
 
@@ -139,7 +138,41 @@ class ReviewerAgent(BaseAgent):
         }
 
     async def process(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """实现基类的抽象 process 方法"""
+        """执行 UI 还原度审核，返回可被解析的 JSON 结果"""
         user_prompt = self.build_user_prompt(task)
         content = await self.call_llm(user_prompt)
-        return self.format_result(task, content)
+
+        # 尝试解析 LLM 返回的 JSON（清理 markdown 标记）
+        parsed = None
+        try:
+            # 去掉 ```json ... ``` 标记
+            cleaned = re.sub(r'```(?:json)?\s*', '', content)
+            cleaned = re.sub(r'\s*```', '', cleaned).strip()
+            # 尝试直接解析整个内容
+            parsed = json.loads(cleaned)
+        except (json.JSONDecodeError, Exception):
+            # 尝试搜索 JSON 片段
+            try:
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group())
+            except Exception:
+                parsed = None
+
+        if not parsed:
+            # 无法解析 JSON，构造一个默认结果
+            parsed = {
+                "overall_status": "FAIL",
+                "overall_score": 0,
+                "summary": "审核 Agent 返回格式错误，无法解析 JSON",
+                "details": {},
+                "critical_issues": [{"severity": "CRITICAL", "category": "审核流程", "description": "审核 Agent 返回了非 JSON 格式", "suggestion": "请检查 Agent 的 process() 方法"}],
+                "verdict": "无法判定，需人工审核"
+            }
+
+        # 确保 overall_score 存在
+        if "overall_score" not in parsed:
+            parsed["overall_score"] = 0
+
+        # 将解析后的 JSON 作为 content 返回（字符串形式，方便 _extract_score 解析）
+        return self.format_result(task, json.dumps(parsed, ensure_ascii=False), parsed)

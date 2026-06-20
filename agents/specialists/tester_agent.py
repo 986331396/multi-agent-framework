@@ -8,6 +8,8 @@
 5. 输出测试报告（通过/不通过 + Bug列表 + 优化建议）
 """
 
+import re
+import json
 from ..base_agent import BaseAgent
 from typing import Any, Dict
 
@@ -70,7 +72,7 @@ class TesterAgent(BaseAgent):
 - [ ] **双指平移**：two-finger pan 实现 camera 平移
 - [ ] **双击重置**：double tap 重置到默认视角
 - [ ] **自动旋转模式**：可开关的 auto-rotate 动画
-- [ ] **拍照/截图**：canvas.toDataURL 或 renderer.domNode.toFilePath 导出图片
+- [ ] **拍照/截图**：canvas.toTempFilePath 或 renderer.domNode.toFilePath 导出图片
 - [ ] **下载/保存**：截图保存到本地相册（wx.saveImageToPhotosAlbum）
 
 #### 3.3 材质与光照
@@ -87,7 +89,7 @@ class TesterAgent(BaseAgent):
 - [ ] Draco 压缩是否启用
 
 ### 4. 微信小程序规范 (权重 10%)
-- [ ] 包大小限制（主包<2MB，分包<2M）
+- [ ] 包大小限制（主包<2MB，分包<2MB）
 - [ ] wx API 使用是否合规（异步调用、权限申请）
 - [ ] 用户隐私协议相关处理
 - [ ] 兼容性（基础库版本）
@@ -98,38 +100,38 @@ class TesterAgent(BaseAgent):
 - [ ] XSS 防护
 - [ ] 敏感数据传输是否加密
 
-## 输出格式
+## 输出格式要求
 
-```json
-{{
-    "test_result": "PASS" | "FAIL" | "CONDITIONAL_PASS",
-    "test_score": <0-100>,
-    "summary": "<一句话总结>",
-    "test_report": {{
-        "code_quality": {{"score": <0-100>, "bugs_found": <number>, "issues": ["..."]}},
-        "functionality": {{"score": <0-100>, "features_total": <n>, "features_passed": <m>, "missing_features": ["..."]}},
-        "3d_testing": {{"score": <0-100>, "model_loading": "PASS|FAIL", "interactions": {{}}, "performance": {{}}}},
-        "miniprogram_compliance": {{"score": <0-100>, "issues": ["..."]}},
-        "security": {{"score": <0-100>, "vulnerabilities": ["..."]}}
-    }},
-    "bug_list": [
-        {{"id": "BUG-001", "severity": "CRITICAL|HIGH|MEDIUM|LOW",
-         "title": "<Bug标题>", "description": "<详细描述>",
-         "file": "<文件名>", "line": <行号>,
-         "fix_suggestion": "<如何修复>",
-         "reproduce_steps": ["<复现步骤1>", "<步骤2>"]}}
-    ],
-    "missing_features": [
-        {{"feature": "<缺失的功能>", "priority": "P0|P1|P2|P3",
-         "description": "<为什么需要这个功能>", 
-         "implementation_hint": "<实现提示>"}}
-    ],
-    "optimization_recommendations": [
-        {{"area": "<优化领域>", "current": "<当前状况>", 
-         "suggested": "<建议方案>", "impact": "高|中|低"}}
-    ],
-    "verdict": "<最终判定>"
-}}
+你必须严格按照以下 JSON 格式输出（不要添加 ```json ``` 标记）：
+
+{"test_result": "PASS" | "FAIL" | "CONDITIONAL_PASS",
+ "test_score": <0-100>,
+ "summary": "<一句话总结>",
+ "test_report": {
+    "code_quality": {"score": <0-100>, "bugs_found": <number>, "issues": ["..."]},
+    "functionality": {"score": <0-100>, "features_total": <n>, "features_passed": <m>, "missing_features": ["..."]},
+    "3d_testing": {"score": <0-100>, "model_loading": "PASS|FAIL", "interactions": {}, "performance": {}},
+    "miniprogram_compliance": {"score": <0-100>, "issues": ["..."]},
+    "security": {"score": <0-100>, "vulnerabilities": ["..."]}
+ },
+ "bug_list": [
+    {"id": "BUG-001", "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+     "title": "<Bug标题>", "description": "<详细描述>",
+     "file": "<文件名>", "line": <行号>,
+     "fix_suggestion": "<如何修复>",
+     "reproduce_steps": ["<复现步骤1>", "<步骤2>"]}
+ ],
+ "missing_features": [
+    {"feature": "<缺失的功能>", "priority": "P0|P1|P2|P3",
+     "description": "<为什么需要这个功能>", 
+     "implementation_hint": "<实现提示>"}
+ ],
+ "optimization_recommendations": [
+    {"area": "<优化领域>", "current": "<当前状况>", 
+     "suggested": "<建议方案>", "impact": "高|中|低"}
+ ],
+ "verdict": "<最终判定>"
+}
 
 ## 严重程度定义
 - CRITICAL: 导致应用崩溃、无法使用、数据丢失
@@ -182,7 +184,47 @@ class TesterAgent(BaseAgent):
         }
 
     async def process(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """实现基类的抽象 process 方法"""
+        """执行功能测试，返回可被解析的 JSON 结果"""
         user_prompt = self.build_user_prompt(task)
         content = await self.call_llm(user_prompt)
-        return self.format_result(task, content)
+
+        # 尝试解析 LLM 返回的 JSON（清理 markdown 标记）
+        parsed = None
+        try:
+            cleaned = re.sub(r'```(?:json)?\s*', '', content)
+            cleaned = re.sub(r'\s*```', '', cleaned).strip()
+            parsed = json.loads(cleaned)
+        except (json.JSONDecodeError, Exception):
+            # 尝试搜索 JSON 片段
+            try:
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group())
+            except Exception:
+                parsed = None
+
+        if not parsed:
+            # 无法解析 JSON，构造一个默认结果
+            parsed = {
+                "test_result": "FAIL",
+                "test_score": 0,
+                "summary": "测试 Agent 返回格式错误，无法解析 JSON",
+                "test_report": {
+                    "code_quality": {"score": 0, "bugs_found": 0, "issues": ["Agent 返回非 JSON 格式"]},
+                    "functionality": {"score": 0, "features_total": 0, "features_passed": 0, "missing_features": []},
+                    "3d_testing": {"score": 0, "model_loading": "FAIL", "interactions": {}, "performance": {}},
+                    "miniprogram_compliance": {"score": 0, "issues": []},
+                    "security": {"score": 0, "vulnerabilities": []}
+                },
+                "bug_list": [],
+                "missing_features": [],
+                "optimization_recommendations": [],
+                "verdict": "无法判定，需人工审核"
+            }
+
+        # 确保 test_score 存在
+        if "test_score" not in parsed:
+            parsed["test_score"] = 0
+
+        # 将解析后的 JSON 作为 content 返回（字符串形式，方便 _extract_score 解析）
+        return self.format_result(task, json.dumps(parsed, ensure_ascii=False), parsed)

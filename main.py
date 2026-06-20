@@ -322,15 +322,35 @@ async def _run_review_pipeline(
     elapsed = time.time() - start_time
     pipeline_result["elapsed_seconds"] = round(elapsed, 1)
 
-    # 简单分数提取
+    # 分数提取（增强版，支持多种返回格式）
     def extract_score(r):
         try:
-            content = r.get("result", {}).get("content", "") if isinstance(r.get("result"), dict) else r.get("content", "")
+            # 方法1：直接获取键
+            if isinstance(r, dict):
+                s = r.get("overall_score", r.get("test_score", None))
+                if s is not None:
+                    return int(s)
+            # 方法2：从 content 字段解析
+            content = r.get("content", "") if isinstance(r, dict) else ""
             if content and isinstance(content, str):
-                import re
-                m = re.search(r'"(?:overall_score|test_score)"\s*:\s*(\d+)', content)
-                return int(m.group(1)) if m else 0
-        except:
+                import json, re
+                # 尝试直接解析 JSON
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict):
+                        s = parsed.get("overall_score", parsed.get("test_score", None))
+                        if s is not None:
+                            return int(s)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                # 正则搜索
+                m = re.search(r'"(?:overall_score|test_score|score|rating)"\s*:\s*(\d+)', content, re.IGNORECASE)
+                if m:
+                    return int(m.group(1))
+                m2 = re.search(r'(总分|分数)[:\s]*(\d+)', content, re.IGNORECASE)
+                if m2:
+                    return int(m2.group(2))
+        except Exception:
             pass
         return 0
 

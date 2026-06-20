@@ -487,18 +487,41 @@ class Coordinator(BaseAgent):
         return await agent.execute_with_retry(task)
 
     def _extract_score(self, result: Dict[str, Any]) -> int:
-        """从审核结果中提取分数"""
+        """从审核结果中提取分数（支持多种返回格式）"""
         try:
-            content = result.get("result", {}).get("content", result.get("content", ""))
+            # 支持嵌套格式: result["result"]["content"] 或 result["content"]
+            raw = result
+            content = ""
+            if isinstance(raw.get("result"), dict):
+                content = raw.get("result", {}).get("content", "")
+            if not content:
+                content = raw.get("content", "")
+            if not content and isinstance(raw.get("review_result"), dict):
+                content = raw.get("review_result", {}).get("content", "")
+            if not content and isinstance(raw.get("test_result"), dict):
+                content = raw.get("test_result", {}).get("content", "")
+
             if isinstance(content, str):
                 import json, re
-                match = re.search(r'"(overall_score|test_score)"\s*:\s*(\d+)', content)
+                # 尝试直接解析整个 content 为 JSON
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict):
+                        return int(parsed.get("overall_score", parsed.get("test_score", 0)))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                # 正则搜索: "overall_score": 85 或 "test_score": 90
+                match = re.search(r'"(overall_score|test_score|score|rating)"\s*:\s*(\d+)', content, re.IGNORECASE)
                 if match:
                     return int(match.group(2))
+                # 也搜索中文描述: 总分：82 或 分数: 75
+                match2 = re.search(r'(总分|分数|score|rating)[:\s]*(\d+)', content, re.IGNORECASE)
+                if match2:
+                    return int(match2.group(2))
             elif isinstance(content, dict):
-                return content.get("overall_score", content.get("test_score", 0))
-        except Exception:
-            pass
+                return int(content.get("overall_score", content.get("test_score", 0)))
+        except Exception as e:
+            self.logger.warning(f"提取分数失败: {e}")
         return 0
 
     def _count_critical_issues(self, pipeline_result: Dict[str, Any]) -> int:
