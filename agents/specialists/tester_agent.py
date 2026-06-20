@@ -222,9 +222,51 @@ class TesterAgent(BaseAgent):
                 "verdict": "无法判定，需人工审核"
             }
 
-        # 确保 test_score 存在
+        # 确保 test_score 存在（支持中文键名）
         if "test_score" not in parsed:
-            parsed["test_score"] = 0
+            # 尝试从中文键提取分数
+            score_val = None
+            # 从顶级键找
+            for k, v in parsed.items():
+                if "评分" in k or "分数" in k or "score" in k.lower():
+                    score_val = v
+                    break
+            # 从嵌套的"测试报告"字典中找
+            if not score_val:
+                report = parsed.get("测试报告", parsed.get("test_report", {}))
+                if isinstance(report, dict):
+                    for k, v in report.items():
+                        if "评分" in k or "分数" in k or "score" in k.lower():
+                            score_val = v
+                            break
+            # 如果还没找到，搜索所有字符串值中的数字
+            if not score_val:
+                for v in parsed.values():
+                    if isinstance(v, str):
+                        m = re.search(r'(\d+)', v)
+                        if m:
+                            score_val = m.group(1)
+                            break
+                if not score_val and isinstance(v, dict):
+                    for sub_v in v.values():
+                        if isinstance(sub_v, str):
+                            m = re.search(r'(\d+)', sub_v)
+                            if m:
+                                score_val = m.group(1)
+                                break
+            # 赋给 test_score
+            if score_val is not None:
+                try:
+                    # 可能是 "62/100" 格式，只取数字部分
+                    if isinstance(score_val, str):
+                        m = re.search(r'(\d+)', score_val)
+                        parsed["test_score"] = int(m.group(1)) if m else 0
+                    else:
+                        parsed["test_score"] = int(score_val)
+                except (ValueError, TypeError):
+                    parsed["test_score"] = 0
+            else:
+                parsed["test_score"] = 0
 
         # 将解析后的 JSON 作为 content 返回（字符串形式，方便 _extract_score 解析）
         return self.format_result(task, json.dumps(parsed, ensure_ascii=False), parsed)
