@@ -147,6 +147,22 @@
             "llm_provider": "deepseek",
             "llm_model": "deepseek-coder",
             "system_prompt": "你是测试工程师，精通Go单元测试、API集成测试、3D模型兼容性测试和70WDAU性能压测。"
+        },
+        "ui_reviewer": {
+            "name": "ReviewerAgent",
+            "role": "UI还原度审核专家",
+            "description": "审核前端页面与设计稿的还原度：布局/颜色/字体/组件/3D视窗",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-chat",
+            "system_prompt": "你是资深UI审核专家，专精于对比设计稿与实现代码的像素级还原度审核。"
+        },
+        "qa_tester": {
+            "name": "TesterAgent",
+            "role": "功能测试审核专家",
+            "description": "代码错误检测/功能完整性/3D交互测试/性能优化/安全性检查",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是QA测试专家，精通小程序前端代码审查、Three.js 3D功能测试、性能优化和安全检测。"
         }
     },
 

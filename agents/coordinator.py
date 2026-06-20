@@ -21,6 +21,8 @@ from .specialists import (
     GarmentModelingAgent,
     SupplyChainAgent,
     QAAgent,
+    ReviewerAgent,
+    TesterAgent,
 )
 from utils.llm_client import LLMClient
 
@@ -39,6 +41,8 @@ AGENT_REGISTRY: Dict[str, Type[BaseAgent]] = {
     "garment_modeling": GarmentModelingAgent,
     "supply_chain_expert": SupplyChainAgent,
     "qa_engineer": QAAgent,
+    "ui_reviewer": ReviewerAgent,
+    "qa_tester": TesterAgent,
 }
 
 # 任务类型 → Agent 映射规则
@@ -104,6 +108,14 @@ TASK_ROUTING_RULES: Dict[str, List[str]] = {
     "full_stack_feature": ["product_manager", "go_backend_dev", "miniprogram_dev"],
     "new_module": ["product_manager", "database_eng", "go_backend_dev", "qa_engineer"],
     "deployment": ["devops_eng", "qa_engineer"],
+
+    # ===== UI 页面实现 + 双 AI 审核流程 =====
+    # 实现阶段：由专业 Agent 生成代码
+    "ui_page_impl": ["miniprogram_dev"],
+    "ui_page_3d_impl": ["miniprogram_dev", "three_graphics_eng"],
+    # 审核阶段：两个审核 Agent 并行审查
+    "ui_review": ["ui_reviewer"],
+    "func_test": ["qa_tester"],
 }
 
 
@@ -303,6 +315,211 @@ class Coordinator(BaseAgent):
         # 3. 整合结果
         final_result = await self.integrate_results(task, valid_results)
         return final_result
+
+    async def process_with_review(
+        self,
+        impl_task: Dict[str, Any],
+        ui_spec: str,
+        page_name: str,
+        is_3d_page: bool = False
+    ) -> Dict[str, Any]:
+        """
+        双 AI 审核流程：实现 → UI审核 → 功能测试 → 最终报告
+
+        Pipeline:
+          1. Implementation Agent 生成代码
+          2. ReviewerAgent 审核 UI 还原度（布局、颜色、字体、组件）
+          3. TesterAgent 审核功能完整性（Bug、缺失功能、性能）
+          4. 汇总输出最终报告
+
+        Args:
+            impl_task: 实现任务的描述
+            ui_spec: UI 设计规格详细说明（JSON字符串或路径）
+            page_name: 页面名称
+            is_3d_page: 是否包含 3D 功能
+        """
+        self.logger.info(f"[审核流程] 开始处理页面: {page_name}")
+        self.logger.info(f"[审核流程] 3D页面={is_3d_page}")
+
+        pipeline_result = {
+            "page_name": page_name,
+            "is_3d_page": is_3d_page,
+            "pipeline_status": "running",
+            "phase_1_impl": None,
+            "phase_2_review": None,
+            "phase_3_test": None,
+            "final_verdict": None,
+            "timestamp_start": "",
+            "timestamp_end": "",
+        }
+
+        import time
+        start_time = time.time()
+        pipeline_result["timestamp_start"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        # ========== Phase 1: 实现 ==========
+        self.logger.info(f"\n{'='*60}")
+        self.logger.info(f"  Phase 1/3: 代码实现 - {page_name}")
+        self.logger.info(f"{'='*60}\n")
+
+        impl_result = await self.dispatch_task(impl_task)
+        pipeline_result["phase_1_impl"] = {
+            "status": impl_result.get("status", "unknown"),
+            "agent": impl_result.get("agent", ""),
+            "has_code": "content" in impl_result and len(impl_result.get("content", "")) > 100,
+        }
+
+        generated_code = impl_result.get("content", "")
+        if not generated_code or len(generated_code) < 50:
+            self.logger.error("[审核流程] Phase 1 失败：未生成有效代码")
+            pipeline_result["pipeline_status"] = "failed_phase1"
+            pipeline_result["final_verdict"] = {
+                "verdict": "FAILED - 代码生成失败",
+                "reason": "Implementation Agent 未返回有效代码",
+                "recommendation": "检查 Agent 配置和 LLM API 连接"
+            }
+            pipeline_result["timestamp_end"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            return pipeline_result
+
+        self.logger.info(f"[审核流程] Phase 1 完成，代码长度: {len(generated_code)} 字符")
+
+        # ========== Phase 2 & 3: 双 AI 并行审核 ==========
+        self.logger.info(f"\n{'='*60}")
+        self.logger.info(f"  Phase 2/3: UI 还原度审核 (ReviewerAgent)")
+        self.logger.info(f"  Phase 3/3: 功能测试审核 (TesterAgent)")
+        self.logger.info(f"  → 两个审核 Agent 并行执行")
+        self.logger.info(f"{'='*60}\n")
+
+        # 构建审核任务
+        review_task = {
+            "id": f"review_{page_name}",
+            "type": "ui_review",
+            "description": f"审核 {page_name} 的 UI 还原度",
+            "page_name": page_name,
+            "ui_spec": ui_spec,
+            "generated_code": generated_code,
+            "screenshot_description": impl_task.get("screenshot_description", ""),
+            "context": f"clothDiy 小程序 {page_name} 页面",
+        }
+
+        test_task = {
+            "id": f"test_{page_name}",
+            "type": "func_test",
+            "description": f"测试 {page_name} 的功能和代码质量",
+            "page_name": page_name,
+            "generated_code": generated_code,
+            "requirements": impl_task.get("description", ""),
+            "is_3d_page": is_3d_page,
+            "context": f"clothDiy 小程序 {page_name} 页面 {'(含3D功能)' if is_3d_page else ''}",
+        }
+
+        # 并行执行两个审核
+        review_coro = self.dispatch_task_to("ui_reviewer", review_task)
+        test_coro = self.dispatch_task_to("qa_tester", test_task)
+
+        review_result, test_result = await asyncio.gather(
+            review_coro, test_coro, return_exceptions=True
+        )
+
+        # 处理审核结果
+        if isinstance(review_result, Exception):
+            self.logger.error(f"[审核流程] UI审核异常: {review_result}")
+            pipeline_result["phase_2_review"] = {"status": "error", "error": str(review_result)}
+        else:
+            pipeline_result["phase_2_review"] = review_result
+            self.logger.info(f"[审核流程] Phase 2 (UI审核) 完成")
+
+        if isinstance(test_result, Exception):
+            self.logger.error(f"[审核流程] 功能测试异常: {test_result}")
+            pipeline_result["phase_3_test"] = {"status": "error", "error": str(test_result)}
+        else:
+            pipeline_result["phase_3_test"] = test_result
+            self.logger.info(f"[审核流程] Phase 3 (功能测试) 完成")
+
+        # ========== 汇总最终报告 ==========
+        elapsed = time.time() - start_time
+        pipeline_result["timestamp_end"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        pipeline_result["elapsed_seconds"] = round(elapsed, 1)
+
+        # 解析审核分数
+        review_score = self._extract_score(pipeline_result.get("phase_2_review", {}))
+        test_score = self._extract_score(pipeline_result.get("phase_3_test", {}))
+        avg_score = (review_score + test_score) / 2 if (review_score > 0 and test_score > 0) else 0
+
+        # 生成最终判定
+        if avg_score >= 80 and review_score >= 75 and test_score >= 75:
+            verdict_status = "PASS"
+            verdict_msg = f"通过 ✅ — UI还原度({review_score}分) + 功能测试({test_score}分)，综合{avg_score:.0f}分"
+        elif avg_score >= 60:
+            verdict_status = "CONDITIONAL_PASS"
+            verdict_msg = f"有条件通过 ⚠️ — 需修复 CRITICAL 和 MAJOR 级别问题后可上线 (UI:{review_score}分, 测试:{test_score}分)"
+        else:
+            verdict_status = "FAIL"
+            verdict_msg = f"不通过 ❌ — 需要重新实现 (UI:{review_score}分, 测试:{test_score}分)"
+
+        pipeline_result["final_verdict"] = {
+            "status": verdict_status,
+            "message": verdict_msg,
+            "scores": {
+                "ui_review": review_score,
+                "func_test": test_score,
+                "average": round(avg_score, 1),
+            },
+            "critical_issues_count": self._count_critical_issues(pipeline_result),
+            "recommendation": self._generate_recommendation(verdict_status, pipeline_result),
+        }
+        pipeline_result["pipeline_status"] = "completed"
+
+        self.logger.info(f"\n{'='*60}")
+        self.logger.info(f"  审核流程完成！")
+        self.logger.info(f"  最终判定: {verdict_msg}")
+        self.logger.info(f"  耗时: {elapsed:.1f}s")
+        self.logger.info(f"{'='*60}\n")
+
+        return pipeline_result
+
+    async def dispatch_task_to(self, agent_key: str, task: Dict[str, Any]) -> Dict[str, Any]:
+        """将任务分派给指定 Agent"""
+        agent = self.registered_agents.get(agent_key)
+        if not agent:
+            raise ValueError(f"Agent not found: {agent_key}")
+        self.logger.info(f"分发到 [{agent_key}]: {task.get('id')}")
+        return await agent.execute_with_retry(task)
+
+    def _extract_score(self, result: Dict[str, Any]) -> int:
+        """从审核结果中提取分数"""
+        try:
+            content = result.get("result", {}).get("content", result.get("content", ""))
+            if isinstance(content, str):
+                import json, re
+                match = re.search(r'"(overall_score|test_score)"\s*:\s*(\d+)', content)
+                if match:
+                    return int(match.group(2))
+            elif isinstance(content, dict):
+                return content.get("overall_score", content.get("test_score", 0))
+        except Exception:
+            pass
+        return 0
+
+    def _count_critical_issues(self, pipeline_result: Dict[str, Any]) -> int:
+        """统计严重问题数量"""
+        count = 0
+        for phase_key in ["phase_2_review", "phase_3_test"]:
+            phase = pipeline_result.get(phase_key, {})
+            result_content = phase.get("result", {}).get("content", "") if isinstance(phase.get("result"), dict) else phase.get("content", "")
+            if isinstance(result_content, str):
+                count += result_content.lower().count('"critical"')
+        return count
+
+    def _generate_recommendation(self, status: str, pipeline_result: Dict[str, Any]) -> str:
+        """根据审核结果生成建议"""
+        if status == "PASS":
+            return "代码质量达标，可以进入下一阶段开发。建议进行真机测试验证 3D 性能。"
+        elif status == "CONDITIONAL_PASS":
+            issues = self._count_critical_issues(pipeline_result)
+            return f"发现 {issues} 个关键问题，请优先修复 CRITICAL 和 MAJOR 级别问题后重新提交审核。"
+        else:
+            return "代码质量不满足要求，建议重新分析设计规格并重写代码，特别关注 3D 交互功能的完整实现。"
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """公共执行接口"""

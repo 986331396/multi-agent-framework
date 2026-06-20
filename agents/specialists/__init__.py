@@ -15,6 +15,8 @@ from .devops_agent import DevOpsAgent
 from .garment_modeling_agent import GarmentModelingAgent
 from .supply_chain_agent import SupplyChainAgent
 from .qa_agent import QAAgent
+from .reviewer_agent import ReviewerAgent
+from .tester_agent import TesterAgent
 
 __all__ = [
     "ProductAgent",
@@ -29,4 +31,6 @@ __all__ = [
     "GarmentModelingAgent",
     "SupplyChainAgent",
     "QAAgent",
+    "ReviewerAgent",
+    "TesterAgent",
 ]

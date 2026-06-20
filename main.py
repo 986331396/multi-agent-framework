@@ -118,6 +118,14 @@ async def run_tasks(tasks: list, coordinator: Coordinator, parallel: bool = Fals
     max_iter = len(tasks) * 2
     iteration = 0
 
+    # 预加载 UI 规格（供审核流程使用）
+    ui_spec_path = Path("tasks/ui_specs/clothDiy_ui_specification.json")
+    ui_spec_content = ""
+    if ui_spec_path.exists():
+        with open(ui_spec_path, "r", encoding="utf-8") as f:
+            ui_spec_content = f.read()
+        logger.info(f"已加载 UI 规格文档 ({len(ui_spec_content)} 字符)")
+
     while remaining and iteration < max_iter:
         iteration += 1
         next_remaining = []
@@ -136,29 +144,82 @@ async def run_tasks(tasks: list, coordinator: Coordinator, parallel: bool = Fals
             print(f"\n{'=' * 60}")
             print(f"[任务 {idx + 1}/{len(tasks)}] {task.get('name', task_id)}")
             print(f"类型: {task.get('type', 'auto')}")
-            print(f"{'=' * 60}")
 
-            # 构建执行参数
-            exec_task = {
-                "type": task.get("type", "interactive"),
-                "description": task.get("description", ""),
-                "context": task.get("context", ""),
-                "module_name": task.get("module_name", ""),
-            }
+            # ===== 检查是否需要双 AI 审核流程 =====
+            needs_review = task.get("needs_review", False)
+            is_3d_page = task.get("is_3d_page", False)
+            page_name = task.get("page_name", "")
 
-            # 如果指定了 assigned_agent，直接执行
-            assigned = task.get("assigned_agent")
-            if assigned:
-                print(f"指定 Agent: {assigned}")
-                # 直接调用指定 Agent
-                agent = coordinator.registered_agents.get(assigned)
-                if agent:
-                    result = await agent.execute(exec_task)
+            if needs_review:
+                print(f"🔍 启用双 AI 审核模式 (UI审核 + 功能测试)")
+                print(f"   3D页面: {'是' if is_3d_page else '否'}")
+                print(f"{'=' * 60}")
+
+                # 构建实现任务
+                impl_task = {
+                    "type": task.get("impl_type", "ui_page_3d_impl" if is_3d_page else "ui_page_impl"),
+                    "description": task.get("description", ""),
+                    "context": task.get("context", ""),
+                    "page_name": page_name,
+                    "screenshot_description": task.get("screenshot_description", ""),
+                    "ui_file": task.get("ui_file", ""),
+                    **task.get("extra_impl_params", {}),
+                }
+
+                # 指定实现 Agent（如果有）
+                assigned_impl_agent = task.get("assigned_agent")
+
+                if assigned_impl_agent:
+                    impl_agent = coordinator.registered_agents.get(assigned_impl_agent)
+                    if impl_agent:
+                        # 先让实现 Agent 生成代码
+                        print(f"\n[Phase 1] 实现阶段 - Agent: {assigned_impl_agent}")
+                        impl_result = await impl_agent.execute_with_retry(impl_task)
+                        generated_code = impl_result.get("content", "")
+                    else:
+                        print(f"⚠️ 未找到实现 Agent '{assigned_impl_agent}'，回退到自动路由")
+                        generated_code = ""
                 else:
-                    print(f"警告: 找不到 Agent '{assigned}'，使用自动路由")
-                    result = await coordinator.execute(exec_task)
+                    generated_code = ""
+
+                # 走完整审核流程
+                if generated_code:
+                    # 如果已经生成了代码，直接构建审核任务
+                    review_result = await _run_review_pipeline(
+                        coordinator, task, generated_code, ui_spec_content, page_name, is_3d_page
+                    )
+                    result = review_result
+                else:
+                    # 使用 Coordinator 的 process_with_review 方法
+                    result = await coordinator.process_with_review(
+                        impl_task=impl_task,
+                        ui_spec=ui_spec_content,
+                        page_name=page_name,
+                        is_3d_page=is_3d_page,
+                    )
             else:
-                result = await coordinator.execute(exec_task)
+                # 普通执行模式
+                print(f"{'=' * 60}")
+
+                exec_task = {
+                    "type": task.get("type", "interactive"),
+                    "description": task.get("description", ""),
+                    "context": task.get("context", ""),
+                    "module_name": task.get("module_name", ""),
+                    "page_name": task.get("page_name", ""),
+                }
+
+                assigned = task.get("assigned_agent")
+                if assigned:
+                    print(f"指定 Agent: {assigned}")
+                    agent = coordinator.registered_agents.get(assigned)
+                    if agent:
+                        result = await agent.execute(exec_task)
+                    else:
+                        print(f"警告: 找不到 Agent '{assigned}'，使用自动路由")
+                        result = await coordinator.execute(exec_task)
+                else:
+                    result = await coordinator.execute(exec_task)
 
             results.append({
                 "id": task_id,
@@ -167,7 +228,20 @@ async def run_tasks(tasks: list, coordinator: Coordinator, parallel: bool = Fals
             })
 
             completed_ids.add(task_id)
-            print(f"\n✅ 任务完成: {task.get('name', task_id)}")
+
+            # 显示完成状态
+            if needs_review:
+                verdict = result.get("final_verdict", {})
+                status_icon = {"PASS": "✅", "CONDITIONAL_PASS": "⚠️", "FAIL": "❌"}
+                icon = status_icon.get(verdict.get("status", ""), "📋")
+                score_info = verdict.get("scores", {})
+                print(f"\n{icon} 审核完成: {verdict.get('message', '无判定')}")
+                if score_info:
+                    print(f"   分数: UI={score_info.get('ui_review', '?')} | 测试={score_info.get('func_test', '?')} | 综合={score_info.get('average', '?')}")
+            else:
+                status = result.get("status", "unknown") if isinstance(result, dict) else "unknown"
+                icon = "✅" if status == "completed" else "❌"
+                print(f"\n{icon} 任务完成: {task.get('name', task_id)}")
 
         remaining = next_remaining
 
@@ -175,6 +249,114 @@ async def run_tasks(tasks: list, coordinator: Coordinator, parallel: bool = Fals
         print(f"\n⚠️ 以下任务因依赖未满足而跳过: {remaining}")
 
     return results
+
+
+async def _run_review_pipeline(
+    coordinator: Coordinator,
+    original_task: dict,
+    generated_code: str,
+    ui_spec: str,
+    page_name: str,
+    is_3d_page: bool
+) -> dict:
+    """执行双 AI 审核 Pipeline"""
+    import time
+    start_time = time.time()
+
+    pipeline_result = {
+        "page_name": page_name,
+        "is_3d_page": is_3d_page,
+        "pipeline_status": "running",
+        "phase_1_impl": {"status": "completed", "code_length": len(generated_code)},
+        "phase_2_review": None,
+        "phase_3_test": None,
+        "final_verdict": None,
+    }
+
+    # Phase 2 & 3: 并行审核
+    print(f"\n[Phase 2] 🎨 UI 还原度审核 (ReviewerAgent)...")
+    print(f"[Phase 3] 🔧 功能测试审核 (TesterAgent)...")
+    print(f"   → 两个审核 Agent 并行执行\n")
+
+    review_task = {
+        "id": f"review_{page_name}",
+        "type": "ui_review",
+        "description": f"审核 {page_name} 的 UI 还原度",
+        "page_name": page_name,
+        "ui_spec": ui_spec,
+        "generated_code": generated_code,
+        "screenshot_description": original_task.get("screenshot_description", ""),
+    }
+
+    test_task = {
+        "id": f"test_{page_name}",
+        "type": "func_test",
+        "description": f"测试 {page_name} 的功能和代码质量",
+        "page_name": page_name,
+        "generated_code": generated_code,
+        "requirements": original_task.get("description", ""),
+        "is_3d_page": is_3d_page,
+    }
+
+    review_coro = coordinator.dispatch_task_to("ui_reviewer", review_task)
+    test_coro = coordinator.dispatch_task_to("qa_tester", test_task)
+
+    review_result, test_result = await asyncio.gather(
+        review_coro, test_coro, return_exceptions=True
+    )
+
+    if isinstance(review_result, Exception):
+        pipeline_result["phase_2_review"] = {"status": "error", "error": str(review_result)}
+        print(f"   [UI审核] ❌ 异常: {review_result}")
+    else:
+        pipeline_result["phase_2_review"] = review_result
+        print(f"   [UI审核] ✅ 完成")
+
+    if isinstance(test_result, Exception):
+        pipeline_result["phase_3_test"] = {"status": "error", "error": str(test_result)}
+        print(f"   [功能测试] ❌ 异常: {test_result}")
+    else:
+        pipeline_result["phase_3_test"] = test_result
+        print(f"   [功能测试] ✅ 完成")
+
+    elapsed = time.time() - start_time
+    pipeline_result["elapsed_seconds"] = round(elapsed, 1)
+
+    # 简单分数提取
+    def extract_score(r):
+        try:
+            content = r.get("result", {}).get("content", "") if isinstance(r.get("result"), dict) else r.get("content", "")
+            if content and isinstance(content, str):
+                import re
+                m = re.search(r'"(?:overall_score|test_score)"\s*:\s*(\d+)', content)
+                return int(m.group(1)) if m else 0
+        except:
+            pass
+        return 0
+
+    rv_score = extract_score(pipeline_result.get("phase_2_review", {}))
+    tt_score = extract_score(pipeline_result.get("phase_3_test", {}))
+    avg = (rv_score + tt_score) / 2 if (rv_score > 0 or tt_score > 0) else 0
+
+    if avg >= 80 and rv_score >= 75 and tt_score >= 75:
+        vs, vm = "PASS", f"通过 ✅ — UI({rv_score}) + 测试({tt_score}) = 综合({avg:.0f})"
+    elif avg >= 60:
+        vs, vm = "CONDITIONAL_PASS", f"有条件通过 ⚠️ — 需修复关键问题 (UI:{rv_score}, 测试:{tt_score})"
+    else:
+        vs, vm = "FAIL", f"不通过 ❌ — 需重新实现 (UI:{rv_score}, 测试:{tt_score})"
+
+    pipeline_result.update({
+        "pipeline_status": "completed",
+        "final_verdict": {"status": vs, "message": vm, "scores": {"ui_review": rv_score, "func_test": tt_score, "average": round(avg, 1)}},
+        "elapsed_seconds": round(elapsed, 1),
+    })
+
+    print(f"\n{'─' * 50}")
+    print(f"  最终判定: {vm}")
+    print(f"  总耗时: {elapsed:.1f}s")
+    print(f"{'─' * 50}")
+
+    return pipeline_result
 
 
 async def file_mode(file_path: str, parallel: bool = False):
