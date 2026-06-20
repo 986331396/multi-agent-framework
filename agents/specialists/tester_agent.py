@@ -29,7 +29,7 @@ class TesterAgent(BaseAgent):
         self.agent_type = "tester"
 
     def get_system_prompt(self, task: Dict[str, Any]) -> str:
-        return f"""你是一位资深的 QA 测试工程师和代码审查专家。你有 12 年以上的全栈测试经验，精通微信小程序、Three.js 3D 图形、Go 后端等技术栈。
+        return """你是一位资深的 QA 测试工程师和代码审查专家。你有 12 年以上的全栈测试经验，精通微信小程序、Three.js 3D 图形、Go 后端等技术栈。
 
 ## 你的角色
 你是 clothDiy 项目的技术守门人。你需要从代码层面严格检查每个交付物，确保：

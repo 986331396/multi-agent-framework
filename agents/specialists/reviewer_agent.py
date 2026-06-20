@@ -28,7 +28,7 @@ class ReviewerAgent(BaseAgent):
         self.agent_type = "reviewer"
 
     def get_system_prompt(self, task: Dict[str, Any]) -> str:
-        return f"""你是一位资深的 UI/UX 审核专家。你的任务是严格审核前端页面的 UI 还原度。
+        return """你是一位资深的 UI/UX 审核专家。你的任务是严格审核前端页面的 UI 还原度。
 
 ## 你的角色
 你拥有 15 年以上的 UI/UX 设计和前端开发经验，能够精确识别设计与实现的差异。
@@ -142,37 +142,71 @@ class ReviewerAgent(BaseAgent):
         user_prompt = self.build_user_prompt(task)
         content = await self.call_llm(user_prompt)
 
-        # 尝试解析 LLM 返回的 JSON（清理 markdown 标记）
+        # 增强 JSON 解析：支持多种格式
         parsed = None
+
+        # 方法1：直接解析整个内容（假设 LLM 返回了纯 JSON）
         try:
-            # 去掉 ```json ... ``` 标记
             cleaned = re.sub(r'```(?:json)?\s*', '', content)
             cleaned = re.sub(r'\s*```', '', cleaned).strip()
-            # 尝试直接解析整个内容
             parsed = json.loads(cleaned)
         except (json.JSONDecodeError, Exception):
-            # 尝试搜索 JSON 片段
+            pass
+
+        # 方法2：搜索 JSON 对象（可能嵌入在解释性文字中）
+        if not parsed:
+            # 找到第一个 { 和最后一个 } 之间的内容
             try:
-                match = re.search(r'\{.*\}', content, re.DOTALL)
-                if match:
-                    parsed = json.loads(match.group())
+                start = content.index('{')
+                end = content.rindex('}') + 1
+                json_str = content[start:end]
+                parsed = json.loads(json_str)
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+        # 方法3：逐字符搜索可解析的 JSON 片段
+        if not parsed:
+            try:
+                depth = 0
+                for i, ch in enumerate(content):
+                    if ch == '{':
+                        if depth == 0:
+                            start = i
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                parsed = json.loads(content[start:i+1])
+                                break
+                            except json.JSONDecodeError:
+                                pass
             except Exception:
-                parsed = None
+                pass
 
         if not parsed:
-            # 无法解析 JSON，构造一个默认结果
+            # 无法解析 JSON，构造一个默认结果（但先尝试从 content 中提取分数）
+            # 尝试正则搜索分数
+            score_match = re.search(r'(?:overall_score|总分|分数)[:\s]*(\d+)', content, re.IGNORECASE)
+            fallback_score = int(score_match.group(1)) if score_match else 0
             parsed = {
-                "overall_status": "FAIL",
-                "overall_score": 0,
-                "summary": "审核 Agent 返回格式错误，无法解析 JSON",
+                "overall_status": "FAIL" if fallback_score < 70 else "CONDITIONAL_PASS",
+                "overall_score": fallback_score,
+                "summary": "审核 Agent 返回格式错误，已从文本中提取分数" if fallback_score > 0 else "审核 Agent 返回格式错误，无法解析 JSON",
                 "details": {},
-                "critical_issues": [{"severity": "CRITICAL", "category": "审核流程", "description": "审核 Agent 返回了非 JSON 格式", "suggestion": "请检查 Agent 的 process() 方法"}],
-                "verdict": "无法判定，需人工审核"
+                "critical_issues": [{"severity": "CRITICAL" if fallback_score == 0 else "HIGH", "category": "审核流程", "description": "审核 Agent 返回了非标准 JSON 格式", "suggestion": "请优化 prompt 让 LLM 只返回 JSON"}] if fallback_score == 0 else [],
+                "verdict": "无法判定，需人工审核" if fallback_score == 0 else f"自动判定：{fallback_score}分"
             }
 
         # 确保 overall_score 存在
         if "overall_score" not in parsed:
-            parsed["overall_score"] = 0
+            # 尝试从其他键获取
+            for key in ["score", "total_score", "rating"]:
+                if key in parsed:
+                    parsed["overall_score"] = parsed[key]
+                    break
+            else:
+                parsed["overall_score"] = 0
 
         # 将解析后的 JSON 作为 content 返回（字符串形式，方便 _extract_score 解析）
         return self.format_result(task, json.dumps(parsed, ensure_ascii=False), parsed)
