@@ -1,0 +1,123 @@
+{
+    "meta": {
+        "project": "clothDiy 服装DIY定制小程序",
+        "version": "1.0",
+        "created_at": "2026-06-20",
+        "description": "clothDiy 项目开发任务清单，按模块拆分，逐个交给 Multi-Agent Framework 执行"
+    },
+    "tasks": [
+
+        {
+            "id": "t001",
+            "name": "用户登录注册模块 - 需求分析",
+            "type": "new_module",
+            "description": "设计用户登录注册模块的需求规格，包含：微信一键登录、手机号+验证码登录、账号密码登录三种方式；用户注册流程；token刷新机制；登录态过期处理。输出PRD文档。",
+            "assigned_agent": "product_manager",
+            "context": "clothDiy 服装DIY定制小程序，用户端为微信小程序"
+        },
+
+        {
+            "id": "t002",
+            "name": "用户登录注册模块 - 数据库设计",
+            "type": "new_module",
+            "description": "设计用户登录注册模块的数据库表结构，包含：用户表(users)、微信开放平台绑定表(wechat_bind)、短信验证码记录表(sms_codes)、登录日志表(login_logs)。使用PostgreSQL，输出完整SQL。",
+            "assigned_agent": "database_eng",
+            "depends_on": ["t001"]
+        },
+
+        {
+            "id": "t003",
+            "name": "用户登录注册模块 - Go后端API",
+            "type": "new_module",
+            "description": "实现用户登录注册模块的Go后端API，使用Gin框架。包含：微信一键登录接口(POST /api/v1/auth/wechat-login)、手机号+验证码登录(POST /api/v1/auth/sms-login)、账号密码登录(POST /api/v1/auth/password-login)、发送验证码(POST /api/v1/auth/send-sms)、token刷新(POST /api/v1/auth/refresh-token)。JWT认证，GORM操作数据库。",
+            "assigned_agent": "go_backend_dev",
+            "context": "clothDiy_go_api 项目，已集成Gin+GORM+PostgreSQL",
+            "depends_on": ["t001", "t002"]
+        },
+
+        {
+            "id": "t004",
+            "name": "用户登录注册模块 - 小程序前端",
+            "type": "miniprogram_page",
+            "description": "实现微信小程序的登录注册页面，包含：微信一键登录按钮、手机号登录表单、账号密码登录表单、注册表单（包含体型数据采集：身高/体重/性别）。使用VantWeapp组件库，Three.js展示登录后的3D人体模型预览。",
+            "assigned_agent": "miniprogram_dev",
+            "context": "clothDiy_miniprogram 微信小程序项目",
+            "depends_on": ["t001"]
+        },
+
+        {
+            "id": "t005",
+            "name": "体型参数采集 - SMPL-X映射算法",
+            "type": "smplx_mapping",
+            "description": "实现厘米级体型参数（身高/体重/胸围/腰围/臀围/肩宽/臂长/腿长）到SMPL-X β参数的映射函数。要求：1. 建立10维β参数与体型测量的线性回归模型；2. 实现反向映射（β→体型）；3. 支持自定义体型微调（滑块控制）；4. 输出Go和TypeScript双版本代码。",
+            "assigned_agent": "three_graphics_eng",
+            "context": "clothDiy项目需要实时将用户体型映射到SMPL-X 3D人体模型"
+        },
+
+        {
+            "id": "t006",
+            "name": "3D服装展示页面 - 小程序前端",
+            "type": "miniprogram_page",
+            "description": "实现小程序端的3D服装展示页面。功能：1. 使用Three.js小程序适配版加载.glb/.gltf格式的3D服装模型；2. 支持 gestures 旋转/缩放/平移；3. 实时应用SMPL-X体型参数变形；4. 面料纹理动态替换；5. 多角度截图分享。性能要求：首帧<2s，Draco压缩，LOD分级加载。",
+            "assigned_agent": "miniprogram_dev",
+            "context": "clothDiy_miniprogram，Three.js已适配微信小程序",
+            "depends_on": ["t005"]
+        },
+
+        {
+            "id": "t007",
+            "name": "服装3D建模规范 - Blender脚本",
+            "type": "garment_modeling",
+            "description": "编写Blender Python脚本，自动化生成标准服装3D模型。支持：T恤/衬衫/外套/裤子/裙子 共5类基础版型；自动蒙皮到SMPL骨架；生成BlendShapes用于体型变形；导出glTF格式（Draco压缩）。输出脚本和3个示例模型（S/M/L码）。",
+            "assigned_agent": "garment_modeling",
+            "context": "clothDiy需要大量服装3D模型，需建立自动化建模流程"
+        },
+
+        {
+            "id": "t008",
+            "name": "订单管理模块 - 完整开发",
+            "type": "new_module",
+            "description": "完整开发订单管理模块：1. 数据库设计（订单表/报价表/生产进度表）；2. Go后端API（下单/报价/确认/取消/进度查询）；3. 订单状态机（待报价→已报价→已确认→生产中→已完成，含拒绝/取消分支）；4. 工厂端接口（报价提交/进度更新）。",
+            "assigned_agent": "go_backend_dev",
+            "context": "clothDiy订单管理，连接用户端和工厂端"
+        },
+
+        {
+            "id": "t009",
+            "name": "管理后台 - 订单管理页面",
+            "type": "admin_page",
+            "description": "使用Vue3 + Ant Design Vue 实现管理后台的订单管理页面。功能：订单列表（分页/筛选/搜索）、订单详情弹窗、报价审核、生产进度跟踪甘特图、导出Excel。",
+            "assigned_agent": "admin_frontend_dev",
+            "context": "clothDiy_admin Vue3管理后台项目",
+            "depends_on": ["t008"]
+        },
+
+        {
+            "id": "t010",
+            "name": "供应链工厂撮合模块 - 需求+数据库+API",
+            "type": "new_module",
+            "description": "实现供应链工厂撮合系统：1. 工厂入驻申请流程（资质审核）；2. 工艺单管理（接收/确认/拒单）；3. 智能工厂推荐（基于品类/产能/历史评分）；4. 订单状态同步；5. 工厂评分系统。输出需求文档+数据库设计+Go API。",
+            "assigned_agent": "supply_chain_expert",
+            "context": "clothDiy需要连接服装工厂，实现C2M柔性供应链"
+        },
+
+        {
+            "id": "t011",
+            "name": "Docker容器化部署配置",
+            "type": "dockerfile",
+            "description": "为clothDiy项目创建完整的Docker容器化配置：1. clothDiy_go_api 多阶段构建Dockerfile；2. PostgreSQL Dockerfile+初始化脚本；3. Redis配置文件；4. Nginx反向代理配置；5. docker-compose.yml一键启动开发环境；6. 生产环境docker-compose.prod.yml（含健康检查）。",
+            "assigned_agent": "devops_eng",
+            "context": "clothDiy后端Go服务需要容器化部署"
+        },
+
+        {
+            "id": "t012",
+            "name": "微服务架构迁移方案",
+            "type": "microservice_design",
+            "description": "设计clothDiy从单体架构到微服务架构的迁移方案。拆分服务：用户服务/订单服务/支付服务/3D渲染服务/供应链服务/通知服务。使用go-zero框架，定义各服务的protobuf接口，设计gRPC通信，RabbitMQ事件总线，服务发现方案。输出架构图和迁移路线图。",
+            "assigned_agent": "microservice_dev",
+            "context": "clothDiy目标支持70W DAU，需要微服务架构支撑"
+        }
+
+    ]
+}

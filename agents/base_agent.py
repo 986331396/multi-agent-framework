@@ -104,6 +104,10 @@ class BaseAgent(ABC):
         """处理任务的核心方法（子类必须实现）"""
         pass
 
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """公共执行接口（便捷方法，等同于 execute_with_retry）"""
+        return await self.execute_with_retry(task)
+
     async def execute_with_retry(
         self,
         task: Dict[str, Any],

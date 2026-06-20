@@ -1,0 +1,15 @@
+{
+    "meta": {
+        "project": "clothDiy 测试",
+        "description": "单任务测试文件"
+    },
+    "tasks": [
+        {
+            "id": "t001",
+            "name": "测试任务 - 简单接口设计",
+            "type": "api_spec",
+            "description": "设计一个简单的用户Profile查询API，包含：GET /api/v1/user/profile 获取用户信息，PUT /api/v1/user/profile 更新用户信息。输出接口文档（路径、参数、响应格式）。",
+            "assigned_agent": "product_manager"
+        }
+    ]
+}
