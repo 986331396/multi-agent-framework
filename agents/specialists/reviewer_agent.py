@@ -198,14 +198,49 @@ class ReviewerAgent(BaseAgent):
                 "verdict": "无法判定，需人工审核" if fallback_score == 0 else f"自动判定：{fallback_score}分"
             }
 
-        # 确保 overall_score 存在
+        # 确保 overall_score 存在（支持中文键名和嵌套 dict）
+        # 递归搜索分数
+        def find_score_in_dict(d, depth=0):
+            """递归在 dict 中搜索分数键，返回分数值（int）或 None"""
+            if depth > 5 or not isinstance(d, dict):
+                return None
+            # 优先匹配的分数键名（按优先级）
+            score_keys = ["overall_score", "整体评分", "总分", "overall_score", "score", "评分"]
+            for k in score_keys:
+                if k in d:
+                    v = d[k]
+                    if isinstance(v, (int, float)):
+                        return int(v)
+                    if isinstance(v, str):
+                        m = re.search(r'(\d+)', v)
+                        if m:
+                            return int(m.group(1))
+            # 递归搜索嵌套 dict 和 list
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    found = find_score_in_dict(v, depth + 1)
+                    if found is not None:
+                        return found
+                if isinstance(v, list):
+                    for item in v:
+                        found = find_score_in_dict(item, depth + 1)
+                        if found is not None:
+                            return found
+            return None
+
         if "overall_score" not in parsed:
-            # 尝试从其他键获取
-            for key in ["score", "total_score", "rating"]:
-                if key in parsed:
-                    parsed["overall_score"] = parsed[key]
-                    break
-            else:
+            score_val = find_score_in_dict(parsed)
+            parsed["overall_score"] = score_val if score_val is not None else 0
+        else:
+            # 已有 overall_score，但确保是整数
+            try:
+                v = parsed["overall_score"]
+                if isinstance(v, str):
+                    m = re.search(r'(\d+)', v)
+                    parsed["overall_score"] = int(m.group(1)) if m else 0
+                else:
+                    parsed["overall_score"] = int(v)
+            except (ValueError, TypeError):
                 parsed["overall_score"] = 0
 
         # 将解析后的 JSON 作为 content 返回（字符串形式，方便 _extract_score 解析）

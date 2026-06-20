@@ -1,0 +1,16 @@
+[
+  {
+    "id": "test_ui_001",
+    "name": "【测试】首页快速验证",
+    "type": "ui_page_impl",
+    "subtype": "create_page",
+    "needs_review": true,
+    "is_3d_page": true,
+    "page_name": "index",
+    "description": "创建 clothDiy 小程序首页，包含：顶部导航栏（返回+标题+分享）、Hero 3D展示区（占屏50%，有Rotate/Try-On/Reset按钮）、热门资产网格（2列，含VIP角标/LED灯带）、底部TabBar（首页/建模库/面料库/我的空间/个人中心）。暗黑赛博朋克风格，主色#7c3aed。",
+    "screenshot_description": "暗黑背景，顶部左侧返回箭头+中间标题『衣匠定制』，Hero区域展示3D人体模型带霓虹光效，下方2列网格展示服装卡片",
+    "output_path": "/Users/mac/Desktop/clothDiy/clothDiy_miniprogram/pages/index",
+    "ui_file": "tasks/ui_specs/clothDiy_ui_specification.json",
+    "assigned_agent": "miniprogram_dev"
+  }
+]

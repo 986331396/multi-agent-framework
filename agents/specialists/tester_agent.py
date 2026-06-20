@@ -183,6 +183,47 @@ class TesterAgent(BaseAgent):
             "status": "completed"
         }
 
+    def _calculate_fallback_score(self, parsed: Dict[str, Any]) -> int:
+        """基于测试报告和 bug 列表计算 fallback 分数（0-100）"""
+        score = 60  # 基础分
+        
+        # 1. 根据测试维度的结果调整分数
+        report = parsed.get("测试报告", {})
+        dimensions = report.get("测试维度", [])
+        if dimensions:
+            dim_scores = []
+            for dim in dimensions:
+                result = dim.get("测试结果", dim.get("result", ""))
+                if result in ("通过", "PASS", "部分通过"):
+                    dim_scores.append(80)
+                elif result in ("不通过", "FAIL"):
+                    dim_scores.append(30)
+                elif "部分" in str(result):
+                    dim_scores.append(55)
+                else:
+                    dim_scores.append(50)
+            if dim_scores:
+                score = int(sum(dim_scores) / len(dim_scores))
+        
+        # 2. 根据 bug 惩罚
+        bug_list = parsed.get("bug_list", [])
+        for bug in bug_list:
+            severity = bug.get("严重级别", bug.get("severity", ""))
+            if severity in ("严重", "CRITICAL"):
+                score -= 12
+            elif severity in ("警告", "HIGH"):
+                score -= 6
+            elif severity in ("建议", "MEDIUM"):
+                score -= 3
+            else:
+                score -= 1
+        
+        # 3. 根据是否缺失功能惩罚
+        missing = parsed.get("missing_features", [])
+        score -= len(missing) * 5
+        
+        return max(0, min(100, score))
+
     async def process(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """执行功能测试，返回可被解析的 JSON 结果"""
         user_prompt = self.build_user_prompt(task)
@@ -222,50 +263,75 @@ class TesterAgent(BaseAgent):
                 "verdict": "无法判定，需人工审核"
             }
 
-        # 确保 test_score 存在（支持中文键名）
-        if "test_score" not in parsed:
-            # 尝试从中文键提取分数
-            score_val = None
-            # 从顶级键找
-            for k, v in parsed.items():
-                if "评分" in k or "分数" in k or "score" in k.lower():
-                    score_val = v
-                    break
-            # 从嵌套的"测试报告"字典中找
-            if not score_val:
-                report = parsed.get("测试报告", parsed.get("test_report", {}))
-                if isinstance(report, dict):
-                    for k, v in report.items():
-                        if "评分" in k or "分数" in k or "score" in k.lower():
-                            score_val = v
-                            break
-            # 如果还没找到，搜索所有字符串值中的数字
-            if not score_val:
-                for v in parsed.values():
-                    if isinstance(v, str):
-                        m = re.search(r'(\d+)', v)
-                        if m:
-                            score_val = m.group(1)
-                            break
-                if not score_val and isinstance(v, dict):
-                    for sub_v in v.values():
-                        if isinstance(sub_v, str):
-                            m = re.search(r'(\d+)', sub_v)
+        # 确保 test_score 存在（支持中文键名和嵌套 dict）
+        # 递归搜索分数
+        def find_test_score_in_dict(d, depth=0):
+            """递归在 dict 中搜索测试分数键，返回分数值（int 0-100）或 None"""
+            if depth > 5 or not isinstance(d, dict):
+                return None
+            # 优先匹配的分数键名（按优先级）
+            score_keys = ["test_score", "总体评分", "测试总分", "总分", "score", "评分", "分数"]
+            for k in score_keys:
+                if k in d:
+                    v = d[k]
+                    if isinstance(v, (int, float)):
+                        s = int(v)
+                        # 合理性检查：分数应该在 0-100 之间
+                        if 0 <= s <= 100:
+                            return s
+                        # 如果是 "72/100" 格式，取分子
+                        if isinstance(v, str):
+                            m = re.search(r'(\d+)\s*/\s*100', v)
                             if m:
-                                score_val = m.group(1)
-                                break
-            # 赋给 test_score
-            if score_val is not None:
-                try:
-                    # 可能是 "62/100" 格式，只取数字部分
-                    if isinstance(score_val, str):
-                        m = re.search(r'(\d+)', score_val)
-                        parsed["test_score"] = int(m.group(1)) if m else 0
+                                return int(m.group(1))
+                    if isinstance(v, str):
+                        # 只匹配 "72分" 或 "72/100" 或 "评分：72" 格式，不匹配日期
+                        m = re.search(r'(?:评分|分数|score)[:\s]*(\d+)\s*(?:分|/100)?', v, re.IGNORECASE)
+                        if m:
+                            s = int(m.group(1))
+                            if 0 <= s <= 100:
+                                return s
+            # 递归搜索嵌套 dict 和 list
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    found = find_test_score_in_dict(v, depth + 1)
+                    if found is not None:
+                        return found
+                if isinstance(v, list):
+                    for item in v:
+                        found = find_test_score_in_dict(item, depth + 1)
+                        if found is not None:
+                            return found
+            return None
+
+        if "test_score" not in parsed:
+            score_val = find_test_score_in_dict(parsed)
+            parsed["test_score"] = score_val if score_val is not None else 0
+        
+        # Fallback: 如果 test_score 还是 0 或不在合理范围，基于测试维度计算结果
+        if not (0 < parsed.get("test_score", 0) <= 100):
+            calculated = self._calculate_fallback_score(parsed)
+            if calculated > 0:
+                parsed["test_score"] = calculated
+        else:
+            # 已有 test_score，但确保是整数且在合理范围内
+            try:
+                v = parsed["test_score"]
+                if isinstance(v, str):
+                    # 防止从日期中提取（如 2025-01-17）
+                    m = re.search(r'(?:评分|分数|score)[:\s]*(\d+)\s*(?:分|/100)?', v, re.IGNORECASE)
+                    if m:
+                        s = int(m.group(1))
+                        parsed["test_score"] = s if 0 <= s <= 100 else 0
                     else:
-                        parsed["test_score"] = int(score_val)
-                except (ValueError, TypeError):
-                    parsed["test_score"] = 0
-            else:
+                        # 尝试直接提取数字，但验证范围
+                        m = re.search(r'(\d+)', v)
+                        s = int(m.group(1)) if m else 0
+                        parsed["test_score"] = s if 0 <= s <= 100 else 0
+                else:
+                    s = int(v)
+                    parsed["test_score"] = s if 0 <= s <= 100 else 0
+            except (ValueError, TypeError):
                 parsed["test_score"] = 0
 
         # 将解析后的 JSON 作为 content 返回（字符串形式，方便 _extract_score 解析）
