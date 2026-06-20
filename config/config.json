@@ -1,1 +1,164 @@
-{"version": "1.0.0", "name": "Multi-Agent Framework", "description": "多智能体协作框架", "api": {"provider": "openai", "base_url": "https://api.openai.com/v1", "api_key": "${OPENAI_API_KEY}", "model": "gpt-4o", "max_tokens": 4096, "temperature": 0.7}, "agents": {"coordinator": {"name": "Coordinator", "role": "任务协调者", "description": "负责任务分解、分配和结果整合", "max_concurrent_tasks": 5}, "researcher": {"name": "ResearchAgent", "role": "研究专家", "description": "负责信息检索、数据分析和研究报告生成"}, "coder": {"name": "CodingAgent", "role": "编程专家", "description": "负责代码生成、调试和技术方案设计"}}, "task_settings": {"timeout": 300, "max_retries": 3, "retry_delay": 2}, "logging": {"level": "INFO", "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s", "file": "framework.log"}}
+{
+    "version": "2.0.0",
+    "name": "Multi-Agent Framework",
+    "description": "多智能体协作框架 - 支持多 LLM Provider",
+
+    "llm_providers": {
+        "openai": {
+            "provider": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "${OPENAI_API_KEY}",
+            "models": {
+                "gpt-4o": { "max_tokens": 4096, "temperature": 0.7 },
+                "gpt-4o-mini": { "max_tokens": 4096, "temperature": 0.5 }
+            }
+        },
+        "deepseek": {
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "${DEEPSEEK_API_KEY}",
+            "models": {
+                "deepseek-chat": { "max_tokens": 8192, "temperature": 0.7 },
+                "deepseek-coder": { "max_tokens": 8192, "temperature": 0.1 },
+                "deepseek-reasoner": { "max_tokens": 8192, "temperature": 0.5 }
+            }
+        },
+        "qwen": {
+            "provider": "qwen",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "api_key": "${DASHSCOPE_API_KEY}",
+            "models": {
+                "qwen-max": { "max_tokens": 8192, "temperature": 0.7 },
+                "qwen-plus": { "max_tokens": 8192, "temperature": 0.5 }
+            }
+        },
+        "codebuddy": {
+            "provider": "codebuddy",
+            "base_url": "https://api.codebuddy.cn/v1",
+            "api_key": "${CODEBUDDY_API_KEY}",
+            "models": {
+                "codebuddy-claude": { "max_tokens": 8192, "temperature": 0.7 }
+            }
+        }
+    },
+
+    "agents": {
+        "coordinator": {
+            "name": "Coordinator",
+            "role": "任务协调者",
+            "description": "负责任务分解、分配和结果整合",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-chat",
+            "max_concurrent_tasks": 10,
+            "system_prompt": "你是项目总协调者。负责将复杂任务分解为子任务，分配给对应的专业Agent，并整合最终结果。"
+        },
+        "product_manager": {
+            "name": "ProductAgent",
+            "role": "产品经理",
+            "description": "需求分析、PRD撰写、用户故事、交互流程设计",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-chat",
+            "system_prompt": "你是资深产品经理，擅长服装电商和3D定制化产品。负责需求分析、撰写PRD、设计用户故事和交互流程。"
+        },
+        "ui_designer": {
+            "name": "UIUXAgent",
+            "role": "UI/UX设计师",
+            "description": "界面设计、设计系统、配色方案、交互原型",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-chat",
+            "system_prompt": "你是资深UI/UX设计师，精通Fashion-Tech风格设计。负责界面视觉设计、设计系统搭建、配色方案和交互原型。"
+        },
+        "miniprogram_dev": {
+            "name": "MiniProgramAgent",
+            "role": "小程序前端工程师",
+            "description": "微信小程序开发、Three.js适配、VantWeapp组件",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是微信小程序开发专家，精通Three.js小程序适配、VantWeapp组件库、SMPL-X模型加载和3D渲染。"
+        },
+        "admin_frontend_dev": {
+            "name": "AdminFrontendAgent",
+            "role": "管理后台前端工程师",
+            "description": "Vue3 + Ant Design、后台管理系统开发",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是Vue3管理后台开发专家，精通Ant Design Vue、Composition API、后台CRUD系统开发。"
+        },
+        "three_graphics_eng": {
+            "name": "ThreeDGraphicsAgent",
+            "role": "3D图形工程师",
+            "description": "Three.js、WebGL2.0、SMPL-X变形、MorphTargets、Draco压缩",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是3D图形工程师，精通Three.js、WebGL2.0、SMPL-X人体参数化模型、MorphTargets变形控制、Draco压缩和LOD优化。"
+        },
+        "go_backend_dev": {
+            "name": "GoBackendAgent",
+            "role": "Go后端工程师",
+            "description": "Gin框架、GORM、RESTful API、JWT认证",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是Go后端开发专家，精通Gin框架、GORM ORM、PostgreSQL、Redis缓存、JWT认证和RESTful API设计。"
+        },
+        "microservice_dev": {
+            "name": "MicroserviceAgent",
+            "role": "微服务工程师",
+            "description": "go-zero微服务、gRPC、服务发现、消息队列",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是微服务架构师，精通go-zero框架、gRPC通信、Protobuf定义、RabbitMQ消息队列和服务发现。"
+        },
+        "database_eng": {
+            "name": "DatabaseAgent",
+            "role": "数据库工程师",
+            "description": "PostgreSQL设计、索引优化、Elasticsearch、数据迁移",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是数据库工程师，精通PostgreSQL表设计、索引优化、Elasticsearch全文搜索和数据迁移策略。"
+        },
+        "devops_eng": {
+            "name": "DevOpsAgent",
+            "role": "DevOps工程师",
+            "description": "Docker、K8s、CI/CD、CDN、监控告警",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是DevOps工程师，精通Docker容器化、Kubernetes编排、GitHub Actions CI/CD、CDN加速和Prometheus监控。"
+        },
+        "garment_modeling": {
+            "name": "GarmentModelingAgent",
+            "role": "服装3D建模师",
+            "description": "Blender建模、MarvelousDesigner、glTF导出、蒙皮绑定",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-chat",
+            "system_prompt": "你是服装3D建模专家，精通Blender建模、Marvelous Designer布料仿真、glTF导出、SMPL骨架蒙皮绑定和BlendShapes制作。"
+        },
+        "supply_chain_expert": {
+            "name": "SupplyChainAgent",
+            "role": "供应链专家",
+            "description": "工厂撮合、订单状态机、工艺单、生产进度跟踪",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-chat",
+            "system_prompt": "你是服装供应链专家，精通工厂撮合系统、订单状态机设计、工艺单生成、生产进度跟踪和柔性供应链管理。"
+        },
+        "qa_engineer": {
+            "name": "QAAgent",
+            "role": "测试工程师",
+            "description": "单元测试、集成测试、3D兼容性测试、性能压测",
+            "llm_provider": "deepseek",
+            "llm_model": "deepseek-coder",
+            "system_prompt": "你是测试工程师，精通Go单元测试、API集成测试、3D模型兼容性测试和70WDAU性能压测。"
+        }
+    },
+
+    "task_settings": {
+        "timeout": 300,
+        "max_retries": 3,
+        "retry_delay": 2
+    },
+
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "file": "framework.log"
+    }
+}

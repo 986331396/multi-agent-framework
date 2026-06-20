@@ -5,12 +5,34 @@ Multi-Agent Framework - Agents Package
 
 from .base_agent import BaseAgent
 from .coordinator import Coordinator
-from .research_agent import ResearchAgent
-from .coding_agent import CodingAgent
+from .specialists import (
+    ProductAgent,
+    UIUXAgent,
+    MiniProgramAgent,
+    AdminFrontendAgent,
+    ThreeDGraphicsAgent,
+    GoBackendAgent,
+    MicroserviceAgent,
+    DatabaseAgent,
+    DevOpsAgent,
+    GarmentModelingAgent,
+    SupplyChainAgent,
+    QAAgent,
+)
 
 __all__ = [
     "BaseAgent",
     "Coordinator",
-    "ResearchAgent",
-    "CodingAgent",
+    "ProductAgent",
+    "UIUXAgent",
+    "MiniProgramAgent",
+    "AdminFrontendAgent",
+    "ThreeDGraphicsAgent",
+    "GoBackendAgent",
+    "MicroserviceAgent",
+    "DatabaseAgent",
+    "DevOpsAgent",
+    "GarmentModelingAgent",
+    "SupplyChainAgent",
+    "QAAgent",
 ]
