@@ -11,6 +11,33 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+# 自动加载 .env 文件（优先使用 python-dotenv，失败时手动解析）
+def _load_dotenv():
+    env_path = Path(__file__).parent.parent / ".env"
+    if not env_path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+        logging.debug(f"[dotenv] 已加载: {env_path}")
+    except ImportError:
+        # 手动解析 .env（支持 KEY=VALUE 和 # 注释）
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                if key and not os.environ.get(key):
+                    os.environ[key] = value
+        logging.debug(f"[dotenv] 手动加载: {env_path}")
+
+_load_dotenv()
+del _load_dotenv
+
+
 def load_config(config_path: str) -> Dict[str, Any]:
     """
     加载 JSON 配置文件
